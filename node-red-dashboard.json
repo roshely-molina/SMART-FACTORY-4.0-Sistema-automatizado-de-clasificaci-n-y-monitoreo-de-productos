@@ -1,0 +1,305 @@
+[
+  {
+    "id": "sf_tab4",
+    "type": "tab",
+    "label": "SMART FACTORY 4.0 | HMI MQTT",
+    "disabled": false,
+    "info": "Telemetria ESP32 Wokwi ↔ Node-RED Dashboard 2.0"
+  },
+  {
+    "id": "sf_mqtt_in",
+    "type": "mqtt in",
+    "z": "sf_tab4",
+    "name": "MQTT ← ESP32: telemetría",
+    "topic": "smartfactory/demo4821/telemetria",
+    "qos": "0",
+    "datatype": "auto-detect",
+    "broker": "sf_broker4",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 165,
+    "y": 120,
+    "wires": [
+      [
+        "sf_fn_data"
+      ]
+    ]
+  },
+  {
+    "id": "sf_fn_data",
+    "type": "function",
+    "z": "sf_tab4",
+    "name": "Validar + indicadores + historial",
+    "func": "// Saneamiento, indicadores y serie temporal de la telemetria.\nlet p = msg.payload;\nif (Buffer.isBuffer(p)) p=p.toString('utf8');\nif (typeof p==='string') { try { p=JSON.parse(p); } catch(e) { node.warn('JSON invalido'); return null; } }\nif (!p || typeof p!=='object' || p.dispositivo!=='SMART_FACTORY_4.0') return null;\nif (!['MARCHA','DETENIDA','ERROR_SENSOR','EMERGENCIA'].includes(p.estado)) return null;\nconst n = key => Number.isFinite(Number(p[key])) ? Math.max(0, Number(p[key])) : 0;\nconst t=Date.now();\nconst anterior=flow.get('sf_last') || null;\nlet historia=flow.get('sf_history') || [];\nif(anterior && n('procesados') < Number(anterior.procesados||0)) historia=[];\nhistoria.push({t, procesadas:n('procesados')});\nhistoria=historia.slice(-30);\nflow.set('sf_history',historia);\nconst procesadas=n('procesados');\nconst calidad=procesadas ? (n('adecuados')/procesadas*100) : 0;\nlet rendimiento_hora=0;\nif(historia.length>1){const inicio=historia[0],fin=historia[historia.length-1]; const dt=fin.t-inicio.t; if(dt>0) rendimiento_hora=Math.max(0,Math.round((fin.procesadas-inicio.procesadas)*3600000/dt));}\nconst s={\n estado:p.estado, modo:p.modo==='ULTRA'?'ULTRA':'AUTO',\n tamano:String(p.tamano||'SIN_OBJETO'), altura_cm:n('altura_cm'), distancia_cm:n('distancia_cm'),\n generados:n('generados'), procesados:procesadas, adecuados:n('adecuados'), pequenos:n('pequenos'), grandes:n('grandes'),\n fallos:n('fallos'), banda:p.banda===true, alarma:p.alarma===true, sensor_valido:p.sensor_valido===true,\n velocidad: (n('velocidad')>=1 && n('velocidad')<=3)?n('velocidad'):2,\n calidad:Number(calidad.toFixed(1)), rendimiento_hora,\n hora:new Date(t).toLocaleTimeString('es-MX',{hour12:false}), edad:0, online:true,\n historia, recibido:t\n};\nflow.set('sf_last',s);\nmsg.payload=s;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 425,
+    "y": 120,
+    "wires": [
+      [
+        "sf_ui_template",
+        "sf_debug_data"
+      ]
+    ]
+  },
+  {
+    "id": "sf_debug_data",
+    "type": "debug",
+    "z": "sf_tab4",
+    "name": "Telemetría procesada",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 715,
+    "y": 170,
+    "wires": []
+  },
+  {
+    "id": "sf_ui_template",
+    "type": "ui-template",
+    "z": "sf_tab4",
+    "group": "sf_group4",
+    "page": "",
+    "ui": "sf_base4",
+    "name": "Panel SMART FACTORY 4.0",
+    "order": 1,
+    "width": "12",
+    "height": "17",
+    "head": "",
+    "format": "<template>\n  <div class=\"sf-panel\">\n    <div class=\"sf-head\">\n      <div><div class=\"sf-eyebrow\">CENTRO DE CONTROL · INDUSTRIA 4.0</div><h1>SMART FACTORY <span>4.0</span></h1><div class=\"sf-sub\">Clasificación industrial · Wokwi ESP32 + MQTT + Node-RED</div></div>\n      <div class=\"sf-status\" :class=\"online ? 'sf-online' : 'sf-offline'\"><span class=\"sf-dot\"></span>{{online ? 'ESP32 CONECTADO' : 'SIN TELEMETRÍA'}}</div>\n    </div>\n    <div class=\"sf-alert\" v-if=\"s.alarma || s.estado==='ERROR_SENSOR' || s.estado==='EMERGENCIA'\">⚠ {{s.estado==='EMERGENCIA' ? 'PARO DE EMERGENCIA' : 'ALERTA DE DETECCIÓN'}} — revisar el sistema antes de restablecer</div>\n    <div class=\"sf-cards\">\n      <div class=\"sf-card\"><div class=\"sf-k\">PRODUCTOS PROCESADOS</div><div class=\"sf-n\">{{num(s.procesados)}}</div><div class=\"sf-note\">Total de piezas de salida</div></div>\n      <div class=\"sf-card\"><div class=\"sf-k\">ADECUADOS</div><div class=\"sf-n sf-green\">{{num(s.adecuados)}}</div><div class=\"sf-note\">Piezas aceptadas</div></div>\n      <div class=\"sf-card\"><div class=\"sf-k\">RECHAZADOS</div><div class=\"sf-n sf-yellow\">{{num(rechazos)}}</div><div class=\"sf-note\">Pequeños + grandes</div></div>\n      <div class=\"sf-card\"><div class=\"sf-k\">CALIDAD</div><div class=\"sf-n sf-blue\">{{num(s.calidad)}}%</div><div class=\"sf-note\">Productos adecuados / procesados</div></div>\n    </div>\n    <div class=\"sf-columns\">\n      <section class=\"sf-section\">\n        <div class=\"sf-section-title\">ESTADO DE PRODUCCIÓN <span class=\"sf-chip\" :class=\"s.estado==='MARCHA' ? 'sf-okchip' : 'sf-warnchip'\">{{s.estado || 'SIN_DATOS'}}</span></div>\n        <div class=\"sf-stategrid\">\n          <div><span>Modo</span><strong>{{s.modo || '—'}}</strong></div>\n          <div><span>Última clasificación</span><strong :class=\"{'sf-green':s.tamano==='ADECUADO','sf-yellow':s.tamano==='PEQUENO','sf-red':s.tamano==='GRANDE'}\">{{s.tamano || '—'}}</strong></div>\n          <div><span>Altura del último paquete</span><strong>{{num(s.altura_cm)}} cm</strong></div>\n          <div><span>Velocidad seleccionada</span><strong>Nivel {{num(s.velocidad)}}</strong></div>\n          <div><span>Errores registrados</span><strong class=\"sf-red\">{{num(s.fallos)}}</strong></div>\n          <div><span>Último dato recibido</span><strong>{{s.hora || '—'}} · {{s.edad || 0}} s</strong></div>\n        </div>\n        <div class=\"sf-section-title sf-mt\">DISTRIBUCIÓN POR TAMAÑO</div>\n        <div class=\"sf-barrow\"><span>Adecuados</span><div class=\"sf-track\"><div class=\"sf-fill sf-fillgreen\" :style=\"{width:pct(s.adecuados)+'%'}\"></div></div><b>{{num(s.adecuados)}}</b></div>\n        <div class=\"sf-barrow\"><span>Pequeños</span><div class=\"sf-track\"><div class=\"sf-fill sf-fillyellow\" :style=\"{width:pct(s.pequenos)+'%'}\"></div></div><b>{{num(s.pequenos)}}</b></div>\n        <div class=\"sf-barrow\"><span>Grandes</span><div class=\"sf-track\"><div class=\"sf-fill sf-fillred\" :style=\"{width:pct(s.grandes)+'%'}\"></div></div><b>{{num(s.grandes)}}</b></div>\n        <p class=\"sf-hint\">Estadísticas de la simulación: los tamaños AUTO son virtuales y los ULTRA provienen del HC-SR04.</p>\n      </section>\n      <section class=\"sf-section\">\n        <div class=\"sf-section-title\">CONTROL REMOTO DE LA BANDA</div>\n        <div class=\"sf-controls\">\n          <button class=\"sf-btn sf-start\" :disabled=\"!online || s.estado!=='DETENIDA'\" @click=\"cmd('I')\">▶ INICIAR</button>\n          <button class=\"sf-btn sf-stop\" :disabled=\"!online || s.estado!=='MARCHA'\" @click=\"cmd('P')\">■ PAUSAR</button>\n          <button class=\"sf-btn sf-reset\" :disabled=\"!online || !['ERROR_SENSOR','EMERGENCIA'].includes(s.estado)\" @click=\"cmd('R')\">↻ RESTABLECER</button>\n        </div>\n        <div class=\"sf-label\">MODO DE OPERACIÓN <small>(solo con la banda detenida)</small></div>\n        <div class=\"sf-controls\"><button class=\"sf-btn sf-alt\" :disabled=\"!online || s.estado!=='DETENIDA'\" @click=\"cmd('A')\">AUTO</button><button class=\"sf-btn sf-alt\" :disabled=\"!online || s.estado!=='DETENIDA'\" @click=\"cmd('U')\">ULTRASÓNICO</button></div>\n        <div class=\"sf-label\">VELOCIDAD DE PRODUCCIÓN</div>\n        <div class=\"sf-controls\"><button v-for=\"v in [1,2,3]\" :key=\"v\" class=\"sf-btn\" :class=\"s.velocidad===v ? 'sf-selected' : 'sf-alt'\" :disabled=\"!online\" @click=\"cmd(String(v))\">{{v===1?'LENTA':v===2?'MEDIA':'RÁPIDA'}}</button></div>\n        <div class=\"sf-divider\"></div>\n        <div class=\"sf-controls\"><button class=\"sf-btn sf-warn\" :disabled=\"!online || s.estado!=='MARCHA'\" @click=\"cmd('F')\">⚠ SIMULAR ERROR</button><button class=\"sf-btn sf-alt\" :disabled=\"!online || s.estado!=='DETENIDA'\" @click=\"cmd('Z')\">PONER CONTADORES A CERO</button></div>\n        <p class=\"sf-hint\">Última orden enviada: <strong>{{ultimaOrden || 'Ninguna'}}</strong>. Verifica el estado recibido: pulsar un botón no confirma por sí solo la ejecución.</p>\n        <p class=\"sf-hint\">El botón PAUSAR es una orden de software. No sustituye un paro de emergencia físico.</p>\n      </section>\n    </div>\n    <section class=\"sf-section sf-chartsection\">\n      <div class=\"sf-section-title\">PRODUCCIÓN EN TIEMPO REAL <span class=\"sf-muted\">historial reciente · muestras de 2 s</span></div>\n      <div class=\"sf-chartmeta\"><div><b>{{num(s.rendimiento_hora)}}</b> <small>piezas/hora estimadas</small></div><div><b>{{num(s.generados)}}</b> <small>piezas generadas</small></div></div>\n      <svg class=\"sf-chart\" viewBox=\"0 0 100 55\" preserveAspectRatio=\"none\" aria-label=\"Tendencia de piezas procesadas\">\n        <line x1=\"0\" y1=\"52\" x2=\"100\" y2=\"52\" stroke=\"#334155\" stroke-width=\"0.5\"/>\n        <line x1=\"0\" y1=\"28\" x2=\"100\" y2=\"28\" stroke=\"#334155\" stroke-dasharray=\"2 2\" stroke-width=\"0.4\"/>\n        <polyline :points=\"linea\" stroke=\"#38bdf8\" stroke-width=\"1.4\" vector-effect=\"non-scaling-stroke\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n      </svg>\n      <p class=\"sf-hint\">Curva acumulada de productos procesados, calculada únicamente con los mensajes MQTT recibidos.</p>\n    </section>\n    <div class=\"sf-footer\">SMART FACTORY 4.0 · Prototipo educativo virtual · Control local prioritario ante fallos</div>\n  </div>\n</template>\n<script>\nexport default {\n  data(){ return {ultimaOrden:''} },\n  computed:{\n    s(){ return this.msg?.payload || {} },\n    online(){ return this.s.online === true },\n    rechazos(){ return Number(this.s.pequenos||0)+Number(this.s.grandes||0) },\n    linea(){\n      const h=this.s.historia || [];\n      if(h.length===0) return '0,52 100,52';\n      const v=h.map(a=>Number(a.procesadas||0));\n      const mi=Math.min(...v), ma=Math.max(...v), delta=Math.max(1,ma-mi);\n      return v.map((n,i)=>`${(i/Math.max(1,v.length-1)*100).toFixed(2)},${(52-(n-mi)/delta*43).toFixed(2)}`).join(' ');\n    }\n  },\n  methods:{\n    num(x){ return Number(x||0).toLocaleString('es-MX',{maximumFractionDigits:1}) },\n    pct(x){ return Math.min(100,Math.max(0,(Number(x||0)/Math.max(1,Number(this.s.procesados||0)))*100)) },\n    cmd(c){\n      this.ultimaOrden=({I:'INICIAR',P:'PAUSAR',R:'RESTABLECER',A:'AUTO',U:'ULTRA',F:'PRUEBA FALLO',Z:'PONER A CERO','1':'VELOCIDAD 1','2':'VELOCIDAD 2','3':'VELOCIDAD 3'})[c]||c;\n      this.send({payload:c});\n    }\n  }\n}\n</script>\n<style>\n.sf-panel{color:#e2e8f0;background:linear-gradient(145deg,#081426,#111827);padding:22px;border-radius:16px;font-family:Inter,system-ui,sans-serif;max-width:1400px;margin:auto}\n.sf-head{display:flex;justify-content:space-between;gap:15px;align-items:center;margin-bottom:22px;flex-wrap:wrap}.sf-head h1{font-size:28px;letter-spacing:-.6px;margin:4px 0;color:#fff;font-weight:800}.sf-head h1 span{color:#38bdf8}.sf-eyebrow{font-size:10px;letter-spacing:2px;font-weight:700;color:#94a3b8}.sf-sub,.sf-note,.sf-hint,.sf-footer{color:#94a3b8;font-size:12px}.sf-status{font-size:11px;letter-spacing:.4px;font-weight:700;border:1px solid #334155;border-radius:30px;padding:11px 14px;white-space:nowrap}.sf-online{color:#86efac}.sf-offline{color:#fda4af}.sf-dot{display:inline-block;background:currentColor;width:7px;height:7px;border-radius:50%;margin-right:7px;box-shadow:0 0 9px currentColor}.sf-alert{background:rgba(239,68,68,.12);border:1px solid #ef4444;color:#fecaca;padding:13px 16px;border-radius:9px;font-size:13px;margin-bottom:15px}.sf-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.sf-card,.sf-section{background:#172338;border:1px solid #29384e;border-radius:12px;padding:16px}.sf-card .sf-k{font-size:10px;color:#9eafc5;letter-spacing:.7px;font-weight:700}.sf-card .sf-n{font-size:32px;color:#fff;font-weight:800;margin:7px 0}.sf-green{color:#4ade80!important}.sf-yellow{color:#fbbf24!important}.sf-red{color:#f87171!important}.sf-blue{color:#38bdf8!important}.sf-columns{display:grid;grid-template-columns:1.12fr 1fr;gap:12px;margin-top:12px}.sf-section-title{font-size:12px;font-weight:800;letter-spacing:.7px;color:#e2e8f0;display:flex;gap:9px;align-items:center;justify-content:space-between}.sf-chip{font-size:10px;border:1px solid #64748b;padding:4px 8px;border-radius:15px}.sf-okchip{color:#4ade80;border-color:#15803d}.sf-warnchip{color:#fbbf24;border-color:#a16207}.sf-stategrid{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:22px}.sf-stategrid div{border-bottom:1px solid #29384e;padding-bottom:9px;display:flex;flex-direction:column;gap:4px}.sf-stategrid span{font-size:11px;color:#93a6bc}.sf-stategrid strong{font-size:14px}.sf-mt{margin-top:22px;margin-bottom:12px}.sf-barrow{display:flex;gap:8px;align-items:center;margin:11px 0;font-size:11px}.sf-barrow span{width:73px}.sf-barrow b{width:35px;text-align:right}.sf-track{height:8px;border-radius:12px;background:#334155;flex:1;overflow:hidden}.sf-fill{height:100%;border-radius:12px;transition:width .3s}.sf-fillgreen{background:#22c55e}.sf-fillyellow{background:#eab308}.sf-fillred{background:#ef4444}.sf-controls{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.sf-btn{border:1px solid #46566e;border-radius:8px;padding:10px 13px;color:#eff6ff;font-weight:700;font-size:11px;flex:1;cursor:pointer;min-width:85px;background:#253750;white-space:nowrap}.sf-btn:hover:not(:disabled){filter:brightness(1.3)}.sf-btn:disabled{opacity:.32;cursor:not-allowed}.sf-start{background:#166534;border-color:#15803d}.sf-stop{background:#991b1b;border-color:#dc2626}.sf-reset{background:#854d0e;border-color:#ca8a04}.sf-selected{background:#075985;border-color:#38bdf8}.sf-alt{background:#243449}.sf-warn{background:#78350f;border-color:#92400e}.sf-label{font-size:11px;color:#93a6bc;font-weight:700;margin-top:21px}.sf-label small{font-weight:400}.sf-divider{height:1px;background:#334155;margin:20px 0 4px}.sf-chartsection{margin-top:12px}.sf-chartmeta{display:flex;gap:36px;margin:20px 0 6px}.sf-chartmeta b{font-size:23px;color:#e0f2fe}.sf-chartmeta small{font-size:11px;color:#94a3b8}.sf-chart{display:block;width:100%;height:185px;background:linear-gradient(180deg,#1e293b,#0c1729);border-radius:9px;padding:10px}.sf-muted{font-size:10px;font-weight:400;color:#64748b}.sf-footer{text-align:center;margin-top:18px}.sf-hint{line-height:1.45;margin-top:12px}@media(max-width:900px){.sf-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.sf-columns{grid-template-columns:1fr}}@media(max-width:530px){.sf-panel{padding:10px}.sf-card .sf-n{font-size:24px}.sf-head h1{font-size:23px}.sf-stategrid{grid-template-columns:1fr}}\n</style>",
+    "storeOutMessages": true,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 760,
+    "y": 120,
+    "wires": [
+      [
+        "sf_fn_cmd"
+      ]
+    ]
+  },
+  {
+    "id": "sf_fn_cmd",
+    "type": "function",
+    "z": "sf_tab4",
+    "name": "Validar órdenes de dashboard",
+    "func": "// Aceptar exclusivamente los comandos aprobados y la telemetria vigente.\nconst key=String(msg.payload||'').trim().toUpperCase();\nconst habilitados=['I','P','R','A','U','1','2','3','F','Z'];\nif(!habilitados.includes(key)) return null;\nconst s=flow.get('sf_last');\nif(!s || Date.now()-s.recibido>=9000){node.warn('No hay telemetria reciente; orden bloqueada');return null;}\nif(key==='I' && s.estado!=='DETENIDA') return null;\nif(key==='P' && s.estado!=='MARCHA') return null;\nif(key==='R' && !['ERROR_SENSOR','EMERGENCIA'].includes(s.estado)) return null;\nif(['A','U','Z'].includes(key) && s.estado!=='DETENIDA') return null;\nif(key==='F' && s.estado!=='MARCHA') return null;\nmsg.payload=key;\nmsg.topic='smartfactory/demo4821/comandos';\nmsg.qos=0;\nmsg.retain=false;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1020,
+    "y": 120,
+    "wires": [
+      [
+        "sf_mqtt_out",
+        "sf_debug_cmd"
+      ]
+    ]
+  },
+  {
+    "id": "sf_mqtt_out",
+    "type": "mqtt out",
+    "z": "sf_tab4",
+    "name": "MQTT → ESP32: comandos",
+    "topic": "smartfactory/demo4821/comandos",
+    "qos": "0",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "sf_broker4",
+    "x": 1275,
+    "y": 95,
+    "wires": []
+  },
+  {
+    "id": "sf_debug_cmd",
+    "type": "debug",
+    "z": "sf_tab4",
+    "name": "Orden MQTT enviada",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 1275,
+    "y": 150,
+    "wires": []
+  },
+  {
+    "id": "sf_tick",
+    "type": "inject",
+    "z": "sf_tab4",
+    "name": "Comprobar conexión cada 5 s",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "5",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 0.5,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 175,
+    "y": 235,
+    "wires": [
+      [
+        "sf_fn_tick"
+      ]
+    ]
+  },
+  {
+    "id": "sf_fn_tick",
+    "type": "function",
+    "z": "sf_tab4",
+    "name": "Enlace activo / sin datos",
+    "func": "const a=flow.get('sf_last');\nif(!a) {msg.payload={online:false,estado:'SIN_DATOS',historia:[],edad:0};return msg;}\nconst edad=Math.round((Date.now()-a.recibido)/1000);\nmsg.payload={...a,edad,online:edad<9};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 235,
+    "wires": [
+      [
+        "sf_ui_template"
+      ]
+    ]
+  },
+  {
+    "id": "sf_broker4",
+    "type": "mqtt-broker",
+    "name": "HiveMQ público (solo demo)",
+    "broker": "broker.hivemq.com",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {}
+  },
+  {
+    "id": "sf_group4",
+    "type": "ui-group",
+    "name": "Centro de control",
+    "page": "sf_page4",
+    "width": "12",
+    "height": "1",
+    "order": 1,
+    "showTitle": false,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "sf_page4",
+    "type": "ui-page",
+    "name": "Producción en vivo",
+    "ui": "sf_base4",
+    "path": "/produccion",
+    "icon": "factory",
+    "layout": "grid",
+    "theme": "sf_theme4",
+    "breakpoints": [
+      {
+        "name": "Default",
+        "px": "0",
+        "cols": "3"
+      },
+      {
+        "name": "Tablet",
+        "px": "576",
+        "cols": "6"
+      },
+      {
+        "name": "Small Desktop",
+        "px": "768",
+        "cols": "9"
+      },
+      {
+        "name": "Desktop",
+        "px": "1024",
+        "cols": "12"
+      }
+    ],
+    "order": 1,
+    "className": "",
+    "visible": "true",
+    "disabled": "false"
+  },
+  {
+    "id": "sf_base4",
+    "type": "ui-base",
+    "name": "SMART FACTORY 4.0",
+    "path": "/dashboard",
+    "appIcon": "",
+    "includeClientData": true,
+    "acceptsClientConfig": [
+      "ui-notification",
+      "ui-control"
+    ],
+    "showPathInSidebar": false,
+    "headerContent": "page",
+    "navigationStyle": "default",
+    "titleBarStyle": "default",
+    "showReconnectNotification": true,
+    "notificationDisplayTime": 1,
+    "showDisconnectNotification": true
+  },
+  {
+    "id": "sf_theme4",
+    "type": "ui-theme",
+    "name": "Industrial oscuro",
+    "colors": {
+      "surface": "#111827",
+      "primary": "#38bdf8",
+      "bgPage": "#080f1e",
+      "groupBg": "#080f1e",
+      "groupOutline": "#1e293b"
+    },
+    "sizes": {
+      "density": "default",
+      "pagePadding": "12px",
+      "groupGap": "12px",
+      "groupBorderRadius": "12px",
+      "widgetGap": "12px"
+    }
+  }
+]
